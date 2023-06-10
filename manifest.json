@@ -1,10 +1,10 @@
 {
-	"id": "obsidian-svelte-starter",
-	"name": "Svelte Starter",
-	"version": "1.0.3",
-	"minAppVersion": "0.12.0",
+	"id": "Learning_Management_Assistant",
+	"name": "Learning Management Assistant",
+	"version": "0.0.1",
+	"minAppVersion": "0.0.1",
 	"description": "A plugin development template for devs who want to use svelte in Obsidian.",
-	"author": "Quorafind",
-	"authorUrl": "https://obsidian.md",
+	"author": "ReidPat",
+	"authorUrl": "https://reidpat.dev",
 	"isDesktopOnly": false
 }

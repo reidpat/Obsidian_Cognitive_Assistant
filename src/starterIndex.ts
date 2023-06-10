@@ -1,6 +1,10 @@
 import { App, ItemView, Platform, Plugin, PluginSettingTab, Setting, WorkspaceLeaf } from 'obsidian';
 
-import DiceRoller from "./ui/DIceRoller.svelte";
+
+import 'dotenv/config'
+// import { OpenAI } from "langchain/llms/openai";
+// import DiceRoller from "./ui/DIceRoller.svelte";
+import BasicPrompt from './ui/BasicPrompt.svelte';
 
 const VIEW_TYPE = "svelte-view";
 
@@ -8,46 +12,84 @@ const VIEW_TYPE = "svelte-view";
 
 interface MyPluginSettings {
     mySetting: string;
+    openAI_API_Key: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
-    mySetting: 'default'
+    mySetting: 'default',
+    openAI_API_Key: import.meta.env.VITE_OPENAI_API_KEY
 }
 
 
-class MySvelteView extends ItemView {
-    view: DiceRoller;
+// class MySvelteView extends ItemView {
+//     view: DiceRoller;
+
+//     getViewType(): string {
+//         return VIEW_TYPE;
+//     }
+
+//     getDisplayText(): string {
+//         return "Dice Roller";
+//     }
+
+//     getIcon(): string {
+//         return "dice";
+//     }
+
+//     async onOpen(): Promise<void> {
+
+//         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+//         this.view = new DiceRoller({ target: (this as any).contentEl, props: {} });
+//     }
+// }
+
+class BasicPromptView extends ItemView{
+    view: BasicPrompt;
+    openAIKey: string;
+
+    constructor(leaf: WorkspaceLeaf, openAIKey: string){
+        super(leaf);
+        this.openAIKey = openAIKey;
+    }
+
 
     getViewType(): string {
-        return VIEW_TYPE;
+        return VIEW_TYPE
     }
 
     getDisplayText(): string {
-        return "Dice Roller";
+        return "Basic Prompt";
     }
 
     getIcon(): string {
-        return "dice";
+        return "dice"
     }
 
-    async onOpen(): Promise<void> {
 
+    async onOpen(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.view = new DiceRoller({ target: (this as any).contentEl, props: {} });
+        this.view = new BasicPrompt({ target: (this as any).contentEl, props: {openAIKey: this.openAIKey} });
     }
 }
 
 export default class MyPlugin extends Plugin {
-    private view: MySvelteView;
+    // private view: MySvelteView;
+    private view: BasicPromptView;
     settings: MyPluginSettings;
 
     async onload() {
         await this.loadSettings();
+        const openAIKey = this.settings.openAI_API_Key;
 
         this.registerView(
             VIEW_TYPE,
-            (leaf: WorkspaceLeaf) => (this.view = new MySvelteView(leaf))
+            (leaf: WorkspaceLeaf) => (this.view = new BasicPromptView(leaf, openAIKey))
         );
+
+        // this.registerView(
+        //     VIEW_TYPE,
+        //     (leaf: WorkspaceLeaf) => (this.view = new BasicPrompt(leaf))
+        // );
 
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
 
@@ -122,5 +164,12 @@ class SampleSettingTab extends PluginSettingTab {
                     this.plugin.settings.mySetting = value;
                     await this.plugin.saveSettings();
                 }));
+
+        new Setting(containerEl)
+                .setName('openAI_API_Key')
+                .setDesc('Add your openAI API key here')
+                .addText(text => text
+                    .setPlaceholder("enter key")
+                    .setValue(this.plugin.settings.mySetting))
     }
 }

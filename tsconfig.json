@@ -3,7 +3,7 @@
         "baseUrl": ".",
         "inlineSources": true,
         "module": "ESNext",
-        "target": "ES6",
+        "target": "ES2020",
         "allowJs": true,
         "noImplicitAny": true,
         "moduleResolution": "node",
@@ -15,7 +15,8 @@
             "ES5",
             "ES6",
             "ES7"
-        ]
+        ],
+        
     },
     "extends": "@tsconfig/svelte/tsconfig.json",
     "include": [

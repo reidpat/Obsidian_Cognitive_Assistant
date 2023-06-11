@@ -62,6 +62,7 @@ class BasicPromptView extends ItemView {
         super(leaf);
         this.openAIKey = openAIKey;
         this.personas = personas;
+        
     }
 
 
@@ -80,7 +81,7 @@ class BasicPromptView extends ItemView {
 
     async onOpen(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey, personas: this.personas } });
+        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey, personas: this.personas, plugin: this.app } });
     }
 }
 

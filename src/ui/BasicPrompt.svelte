@@ -1,12 +1,11 @@
 <script lang="ts">
     import "dotenv/config";
-    import { requestUrl, Notice } from "obsidian";
+    import { requestUrl, Notice, App } from "obsidian";
 
-    let systemInput = "";
     let promptInput = "";
-    let promptOutput = "res...";
     export let openAIKey: string = "";
     export let personas: any[] = [];
+    export let plugin;
     let selected;
 
     import { ChatOpenAI } from "langchain/chat_models/openai";
@@ -16,17 +15,59 @@
         BaseChatMessage,
         AIChatMessage,
     } from "langchain/schema";
+    import { onMount } from "svelte";
 
-    let conversationHistory: BaseChatMessage[] = loadChatHistory();
+    onMount(async () => {
+        conversationHistory = await loadChatHistory();
+    });
+    let conversationHistory: BaseChatMessage[] = [];
+    let recordConversation = true;
+    let chatHistoryFile;
+    let loading = false;
+    let messagesContainer;
+
+    async function createNewConversation() {
+        let newFile = await plugin.vault.create(
+            "LLM History/newChat.md",
+            "this is a new chat"
+        );
+        chatHistoryFile = newFile;
+        console.log(newFile);
+    }
+
+    function parseChatLog(chatLog) {
+        // Use a regular expression to split the text into message prefixes and contents
+        const rawMessages = chatLog.match(
+            /(human|ai):[\s\S]*?(?=(human|ai):|$)/g
+        );
+
+        // Create an array of message objects
+        let messages: BaseChatMessage[] = [];
+        for (let rawMessage of rawMessages) {
+            const prefix = rawMessage.slice(0, rawMessage.indexOf(":")).trim();
+            const message = rawMessage
+                .slice(rawMessage.indexOf(":") + 1)
+                .trim();
+
+            if (prefix === "human") {
+                messages.push(new HumanChatMessage(message));
+            } else if (prefix === "ai") {
+                messages.push(new AIChatMessage(message));
+            }
+        }
+
+        return messages;
+    }
 
     //Eventually will read from a Markdown(?) file
-    function loadChatHistory() {
-        return [
-            new HumanChatMessage("Congratulate me on completing this code"),
-            new AIChatMessage(
-                "Congratulations! I'm happy to hear that you've completed your code test. How do you feel like the test went overall? What can you do to improve further?"
-            ),
-        ];
+    async function loadChatHistory() {
+        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
+            "LLM History/newChat.md"
+        );
+        let historyContent = await plugin.vault.read(chatHistoryFile);
+        conversationHistory = parseChatLog(historyContent);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return conversationHistory; 
     }
 
     function handleKeydown(event) {
@@ -36,19 +77,29 @@
         }
     }
 
+    async function addMessageToHistory(message) {
+        plugin.vault.append(
+            chatHistoryFile,
+            `\n${message.role}:\n${message.content}\n`
+        );
+    }
+
     async function langChainPrompt(): Promise<void> {
         if (promptInput.trim() == "") {
             return;
         }
+        let loading = true;
         conversationHistory.push(new HumanChatMessage(promptInput));
         conversationHistory = conversationHistory;
+        addMessageToHistory({ role: "human", content: promptInput });
         promptInput = "";
-        const chat = new ChatOpenAI({ openAIApiKey: openAIKey});
+        const chat = new ChatOpenAI({ openAIApiKey: openAIKey });
+        
         const response = await chat.call(
             [new SystemChatMessage(selected.content), ...conversationHistory],
-            { 
+            {
                 options: {
-                    headers: {
+                    headers: { 
                         mode: "cors",
                         "Access-Control-Allow-Origin": "*",
                     },
@@ -56,7 +107,10 @@
             }
         );
         conversationHistory.push(new AIChatMessage(response.text));
+        addMessageToHistory({ role: "ai", content: response.text });
         conversationHistory = conversationHistory;
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        loading = false;
     }
 
     async function copyToClipboard(text) {
@@ -81,19 +135,30 @@
             </option>
         {/each}
     </select>
-    <div class="conversation-window">
+
+    <button on:click={createNewConversation}>New Chat</button>
+    <label for="record">Record Conversation</label>
+    <input type="checkbox" name="record" bind:checked={recordConversation} />
+    <div class="conversation-window" bind:this={messagesContainer}>
         {#each conversationHistory as message (message.text)}
             {#if message._getType() != "system"}
-            <div class="message" class:human="{message._getType() === "human"}" class:ai="{message._getType() === "ai"}">
-                <span>{message.text}</span>
-                <button  
-                    class="copy-button"
-                    on:click={() => copyToClipboard(message.text)}>📋</button
+                <div
+                    class="message"
+                    class:human={message._getType() === "human"}
+                    class:ai={message._getType() === "ai"}
                 >
-            </div>
+                    <span>{message.text}</span>
+                    <button
+                        class="copy-button"
+                        on:click={() => copyToClipboard(message.text)}
+                        >📋</button
+                    >
+                </div>
             {/if}
-         
         {/each}
+        {#if loading}
+            <div class="message ai"><span>loading...</span></div>
+        {/if}
         <div class="input-area">
             <textarea bind:value={promptInput} on:keydown={handleKeydown} />
             <button
@@ -111,10 +176,13 @@
         flex-direction: column;
         width: 100%;
         max-width: 1200px;
+        max-height: 80vh;
+        overflow-y: scroll;
+        border: 1px solid grey;
     }
-    .message {
+    .message { 
         border: 1px solid white;
-        max-width: 80%;
+        max-width: 80%; 
         margin: 10px;
     }
     .ai {
@@ -132,10 +200,10 @@
     .input-area textarea {
         flex-grow: 1;
         margin-right: 1em;
-        resize: vertical; 
+        resize: vertical;
     }
 
-    .message {  
+    .message {
         position: relative;
     }
 

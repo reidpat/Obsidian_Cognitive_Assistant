@@ -5,7 +5,6 @@ import 'dotenv/config'
 // import { OpenAI } from "langchain/llms/openai";
 // import DiceRoller from "./ui/DIceRoller.svelte";
 import BasicPrompt from './ui/BasicPrompt.svelte';
-
 const VIEW_TYPE = "svelte-view";
 
 const setRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
@@ -57,10 +56,12 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 class BasicPromptView extends ItemView {
     view: BasicPrompt;
     openAIKey: string;
+    personas: any[];
 
-    constructor(leaf: WorkspaceLeaf, openAIKey: string) {
+    constructor(leaf: WorkspaceLeaf, openAIKey: string, personas: any[]) {
         super(leaf);
         this.openAIKey = openAIKey;
+        this.personas = personas;
     }
 
 
@@ -79,7 +80,7 @@ class BasicPromptView extends ItemView {
 
     async onOpen(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey } });
+        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey, personas: this.personas } });
     }
 }
 
@@ -91,10 +92,23 @@ export default class MyPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
         const openAIKey = this.settings.openAI_API_Key;
+        const personas = await getFiles(this);
+
+        async function getFiles(that) {
+            const files = that.app.vault.getMarkdownFiles();
+            const filteredFiles = files.filter(f => f.path.includes("LLM Personas"));
+            const result = await Promise.all(filteredFiles.map(async f => {
+                const content = await that.app.vault.read(f);
+                const title = f.name;
+                return { content, title }
+            }));
+            return result;
+        }
+
 
         this.registerView(
             VIEW_TYPE,
-            (leaf: WorkspaceLeaf) => (this.view = new BasicPromptView(leaf, openAIKey))
+            (leaf: WorkspaceLeaf) => (this.view = new BasicPromptView(leaf, openAIKey, personas))
         );
 
         // this.registerView(
@@ -165,6 +179,7 @@ class SampleSettingTab extends PluginSettingTab {
 
         containerEl.createEl('h2', { text: 'Settings for my awesome plugin.' });
 
+
         new Setting(containerEl)
             .setName('Setting #1')
             .setDesc('It\'s a secret')
@@ -181,6 +196,11 @@ class SampleSettingTab extends PluginSettingTab {
             .setDesc('Add your openAI API key here')
             .addText(text => text
                 .setPlaceholder("enter key")
-                .setValue(this.plugin.settings.mySetting))
+                .setValue(this.plugin.settings.mySetting)
+                .onChange(async (value) => {
+                    this.plugin.settings.mySetting = value;
+                    await this.plugin.saveSettings();
+                }));
+                
     }
 }

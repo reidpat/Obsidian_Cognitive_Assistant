@@ -8,6 +8,17 @@ import BasicPrompt from './ui/BasicPrompt.svelte';
 
 const VIEW_TYPE = "svelte-view";
 
+const setRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+XMLHttpRequest.prototype.setRequestHeader = function newSetRequestHeader(
+    key: string,
+    val: string
+) {
+    if (key.toLocaleLowerCase() === "user-agent") {
+        return;
+    }
+    setRequestHeader.apply(this, [key, val]);
+};
+
 // Remember to rename these classes and interfaces!
 
 interface MyPluginSettings {
@@ -43,11 +54,11 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 //     }
 // }
 
-class BasicPromptView extends ItemView{
+class BasicPromptView extends ItemView {
     view: BasicPrompt;
     openAIKey: string;
 
-    constructor(leaf: WorkspaceLeaf, openAIKey: string){
+    constructor(leaf: WorkspaceLeaf, openAIKey: string) {
         super(leaf);
         this.openAIKey = openAIKey;
     }
@@ -68,7 +79,7 @@ class BasicPromptView extends ItemView{
 
     async onOpen(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.view = new BasicPrompt({ target: (this as any).contentEl, props: {openAIKey: this.openAIKey} });
+        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey } });
     }
 }
 
@@ -166,10 +177,10 @@ class SampleSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
-                .setName('openAI_API_Key')
-                .setDesc('Add your openAI API key here')
-                .addText(text => text
-                    .setPlaceholder("enter key")
-                    .setValue(this.plugin.settings.mySetting))
+            .setName('openAI_API_Key')
+            .setDesc('Add your openAI API key here')
+            .addText(text => text
+                .setPlaceholder("enter key")
+                .setValue(this.plugin.settings.mySetting))
     }
 }

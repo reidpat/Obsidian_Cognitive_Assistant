@@ -18,31 +18,82 @@
     import { onMount } from "svelte";
 
     onMount(async () => {
-        conversationHistory = await loadChatHistory();
+        init();
+        console.log(chatHistoryOptions);
     });
+
+    async function init(){
+        chatHistoryOptions = await getFiles();
+        selectedHistory = chatHistoryOptions[0];
+        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
+            "LLM History/"+ selectedHistory.title
+        );
+        conversationHistory = await loadChatHistory(selectedHistory.content); 
+        console.log(chatHistoryFile);
+    }
+
+
     let conversationHistory: BaseChatMessage[] = [];
-    let recordConversation = true;
-    let chatHistoryFile;
+    let recordConversation = true; 
+    let chatHistoryFile; 
+    let rawFiles = [];
+    let chatHistoryText;
+    let selectedHistory;
+    let chatHistoryOptions: any[] = [];
     let loading = false;
     let messagesContainer;
 
     async function createNewConversation() {
         let newFile = await plugin.vault.create(
             "LLM History/newChat.md",
-            "this is a new chat"
+            ""
         );
         chatHistoryFile = newFile;
+        chatHistoryText = await getFile(newFile);
+
+        chatHistoryOptions = [...chatHistoryOptions, chatHistoryText];
+        await loadChatHistory(chatHistoryText.content);
+        selectedHistory = chatHistoryText;
         console.log(newFile);
     }
 
+    async function getFile(f) {
+        const content = await plugin.vault.read(f);
+        const title = f.name;
+        return { content, title };
+    }
+
+    //this is repeated from the starterIndex file and will need to be abstracted
+    async function getFiles() {
+        const files = plugin.vault.getMarkdownFiles();
+        rawFiles = files;
+        const filteredFiles = files.filter((f) =>
+            f.path.includes("LLM History")
+        );
+        const result = await Promise.all(filteredFiles.map(async (f) => getFile(f)));
+        return result;
+    }
+
+    async function selectNewChat(){
+        console.log(selectedHistory);
+        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
+            "LLM History/" + selectedHistory.title
+        );
+        loadChatHistory(selectedHistory.content);
+    }
+
     function parseChatLog(chatLog) {
+        let messages: BaseChatMessage[] = [];
+        if(chatLog.length == 0){
+            return messages;
+        }
         // Use a regular expression to split the text into message prefixes and contents
         const rawMessages = chatLog.match(
             /(human|ai):[\s\S]*?(?=(human|ai):|$)/g
         );
 
         // Create an array of message objects
-        let messages: BaseChatMessage[] = [];
+        
         for (let rawMessage of rawMessages) {
             const prefix = rawMessage.slice(0, rawMessage.indexOf(":")).trim();
             const message = rawMessage
@@ -60,14 +111,10 @@
     }
 
     //Eventually will read from a Markdown(?) file
-    async function loadChatHistory() {
-        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
-            "LLM History/newChat.md"
-        );
-        let historyContent = await plugin.vault.read(chatHistoryFile);
-        conversationHistory = parseChatLog(historyContent);
+    async function loadChatHistory(fileContent) {
+        conversationHistory = parseChatLog(fileContent);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        return conversationHistory; 
+        return conversationHistory;
     }
 
     function handleKeydown(event) {
@@ -78,10 +125,18 @@
     }
 
     async function addMessageToHistory(message) {
+        console.log(chatHistoryFile);
         plugin.vault.append(
             chatHistoryFile,
             `\n${message.role}:\n${message.content}\n`
         );
+    }
+
+    async function renameConversation(fileName, newFileName){
+        let file = await plugin.vault.getAbstractFileByPath("LLM History/" + fileName);
+        chatHistoryFile = file;
+        await plugin.vault.rename(file, "LLM History/" + newFileName);
+        init(); 
     }
 
     async function langChainPrompt(): Promise<void> {
@@ -89,17 +144,18 @@
             return;
         }
         let loading = true;
+        console.log(conversationHistory);
         conversationHistory.push(new HumanChatMessage(promptInput));
         conversationHistory = conversationHistory;
         addMessageToHistory({ role: "human", content: promptInput });
         promptInput = "";
         const chat = new ChatOpenAI({ openAIApiKey: openAIKey });
-        
+
         const response = await chat.call(
             [new SystemChatMessage(selected.content), ...conversationHistory],
             {
                 options: {
-                    headers: { 
+                    headers: {
                         mode: "cors",
                         "Access-Control-Allow-Origin": "*",
                     },
@@ -135,13 +191,21 @@
             </option>
         {/each}
     </select>
+    <select bind:value={selectedHistory} on:change={selectNewChat}>
+        {#each chatHistoryOptions as file}
+            <option value={file}>
+                {file.title}
+            </option>
+        {/each}
+    </select>
 
-    <button on:click={createNewConversation}>New Chat</button>
+    <button on:click={createNewConversation} class:disabled={!selectedHistory || selectedHistory.title == "newChat.md"}>New Chat</button>
+    <button on:click={()=>{renameConversation(selectedHistory.title,"new Name.md")}}>Rename</button>
     <label for="record">Record Conversation</label>
     <input type="checkbox" name="record" bind:checked={recordConversation} />
     <div class="conversation-window" bind:this={messagesContainer}>
         {#each conversationHistory as message (message.text)}
-            {#if message._getType() != "system"}
+            {#if message._getType() != "system"} 
                 <div
                     class="message"
                     class:human={message._getType() === "human"}
@@ -179,10 +243,11 @@
         max-height: 80vh;
         overflow-y: scroll;
         border: 1px solid grey;
+        margin-top: 20px;
     }
-    .message { 
+    .message {
         border: 1px solid white;
-        max-width: 80%; 
+        max-width: 80%;
         margin: 10px;
     }
     .ai {

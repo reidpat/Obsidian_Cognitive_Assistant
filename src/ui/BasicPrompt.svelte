@@ -22,20 +22,19 @@
         console.log(chatHistoryOptions);
     });
 
-    async function init(){
+    async function init() {
         chatHistoryOptions = await getFiles();
         selectedHistory = chatHistoryOptions[0];
         chatHistoryFile = await plugin.vault.getAbstractFileByPath(
-            "LLM History/"+ selectedHistory.title
+            "LLM History/" + selectedHistory.title
         );
-        conversationHistory = await loadChatHistory(selectedHistory.content); 
+        conversationHistory = await loadChatHistory(selectedHistory.content);
         console.log(chatHistoryFile);
     }
 
-
     let conversationHistory: BaseChatMessage[] = [];
-    let recordConversation = true; 
-    let chatHistoryFile; 
+    let recordConversation = true;
+    let chatHistoryFile;
     let rawFiles = [];
     let chatHistoryText;
     let selectedHistory;
@@ -44,10 +43,7 @@
     let messagesContainer;
 
     async function createNewConversation() {
-        let newFile = await plugin.vault.create(
-            "LLM History/newChat.md",
-            ""
-        );
+        let newFile = await plugin.vault.create("LLM History/newChat.md", "");
         chatHistoryFile = newFile;
         chatHistoryText = await getFile(newFile);
 
@@ -70,21 +66,23 @@
         const filteredFiles = files.filter((f) =>
             f.path.includes("LLM History")
         );
-        const result = await Promise.all(filteredFiles.map(async (f) => getFile(f)));
+        const result = await Promise.all(
+            filteredFiles.map(async (f) => getFile(f))
+        );
         return result;
     }
 
-    async function selectNewChat(){
-        console.log(selectedHistory);
+    async function selectNewChat() {
         chatHistoryFile = await plugin.vault.getAbstractFileByPath(
             "LLM History/" + selectedHistory.title
         );
-        loadChatHistory(selectedHistory.content);
+        let tempHistory = await getFile(chatHistoryFile);
+        conversationHistory = await loadChatHistory(tempHistory.content);
     }
 
     function parseChatLog(chatLog) {
         let messages: BaseChatMessage[] = [];
-        if(chatLog.length == 0){
+        if (chatLog.length == 0) {
             return messages;
         }
         // Use a regular expression to split the text into message prefixes and contents
@@ -93,7 +91,7 @@
         );
 
         // Create an array of message objects
-        
+
         for (let rawMessage of rawMessages) {
             const prefix = rawMessage.slice(0, rawMessage.indexOf(":")).trim();
             const message = rawMessage
@@ -132,11 +130,58 @@
         );
     }
 
-    async function renameConversation(fileName, newFileName){
-        let file = await plugin.vault.getAbstractFileByPath("LLM History/" + fileName);
+    async function renameConversation(fileName, newFileName) {
+        console.log(fileName, newFileName);
+        let file = await plugin.vault.getAbstractFileByPath(
+            "LLM History/" + fileName
+        );
         chatHistoryFile = file;
+        
         await plugin.vault.rename(file, "LLM History/" + newFileName);
-        init(); 
+        init();
+    }
+
+    async function generateNewName() {
+        const newChat = new ChatOpenAI({
+            openAIApiKey: openAIKey,
+            temperature: 0.7,
+        }); 
+        console.log(conversationHistory);
+        const res = await newChat.call(
+            [
+                new SystemChatMessage(
+                    "Create a short but unique name for the following conversation."
+                ),
+                new SystemChatMessage(
+                    "your response should be no longer than 6 words"
+                ),
+                new SystemChatMessage(
+                    "only include the exact name in your response and no other words"
+                ),
+                ...conversationHistory,
+            ],
+            {
+                options: {
+                    headers: {
+                        mode: "cors",
+                        "Access-Control-Allow-Origin": "*",
+                    },
+                },
+            }
+        );
+        let newName = filterInvalidChars(res.text);
+        console.log(newName);
+        renameConversation("newChat.md", newName + ".md");
+    }
+
+    function filterInvalidChars(fileName) {
+        // The RegExp pattern below matches all invalid characters commonly disallowed in file systems
+        let pattern = /[\/\\:*?"<>#.|]/g;
+
+        // Replace all invalid characters in the fileName string with an empty string
+        let validFileName = fileName.replace(pattern, "");
+
+        return validFileName;
     }
 
     async function langChainPrompt(): Promise<void> {
@@ -144,12 +189,14 @@
             return;
         }
         let loading = true;
-        console.log(conversationHistory);
         conversationHistory.push(new HumanChatMessage(promptInput));
         conversationHistory = conversationHistory;
         addMessageToHistory({ role: "human", content: promptInput });
         promptInput = "";
-        const chat = new ChatOpenAI({ openAIApiKey: openAIKey });
+        const chat = new ChatOpenAI({
+            openAIApiKey: openAIKey,
+            temperature: 0.3,
+        });
 
         const response = await chat.call(
             [new SystemChatMessage(selected.content), ...conversationHistory],
@@ -166,6 +213,9 @@
         addMessageToHistory({ role: "ai", content: response.text });
         conversationHistory = conversationHistory;
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        if ((selectedHistory.title = "newChat")) {
+            generateNewName();
+        }
         loading = false;
     }
 
@@ -199,13 +249,26 @@
         {/each}
     </select>
 
-    <button on:click={createNewConversation} class:disabled={!selectedHistory || selectedHistory.title == "newChat.md"}>New Chat</button>
-    <button on:click={()=>{renameConversation(selectedHistory.title,"new Name.md")}}>Rename</button>
+    <button
+        on:click={createNewConversation}
+        class:disabled={!selectedHistory ||
+            selectedHistory.title == "newChat.md"}>New Chat</button
+    >
+    <button
+        on:click={() => {
+            renameConversation(selectedHistory.title, "new Name.md");
+        }}>Rename</button
+    >
+    <button
+        on:click={() => {
+           init();
+        }}>Reset</button
+    >
     <label for="record">Record Conversation</label>
     <input type="checkbox" name="record" bind:checked={recordConversation} />
     <div class="conversation-window" bind:this={messagesContainer}>
         {#each conversationHistory as message (message.text)}
-            {#if message._getType() != "system"} 
+            {#if message._getType() != "system"}
                 <div
                     class="message"
                     class:human={message._getType() === "human"}

@@ -77,10 +77,12 @@
             "LLM History/" + selectedHistory.title
         );
         let tempHistory = await getFile(chatHistoryFile);
+        // let metaData = await getFileCache(chatHistoryFile);
+        // console.log(metaData);
         conversationHistory = await loadChatHistory(tempHistory.content);
     }
 
-    function parseChatLog(chatLog) {
+    function parseChatLog(chatLog) { 
         let messages: BaseChatMessage[] = [];
         if (chatLog.length == 0) {
             return messages;
@@ -148,7 +150,7 @@
         }); 
         console.log(conversationHistory);
         const res = await newChat.call(
-            [
+            [   ...conversationHistory,
                 new SystemChatMessage(
                     "Create a short but unique name for the following conversation."
                 ),
@@ -156,9 +158,9 @@
                     "your response should be no longer than 6 words"
                 ),
                 new SystemChatMessage(
+
                     "only include the exact name in your response and no other words"
                 ),
-                ...conversationHistory,
             ],
             {
                 options: {
@@ -188,7 +190,7 @@
         if (promptInput.trim() == "") {
             return;
         }
-        let loading = true;
+        loading = true;
         conversationHistory.push(new HumanChatMessage(promptInput));
         conversationHistory = conversationHistory;
         addMessageToHistory({ role: "human", content: promptInput });
@@ -199,7 +201,7 @@
         });
 
         const response = await chat.call(
-            [new SystemChatMessage(selected.content), ...conversationHistory],
+            [...conversationHistory, new SystemChatMessage(selected.content)],
             {
                 options: {
                     headers: {

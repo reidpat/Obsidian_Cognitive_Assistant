@@ -1,12 +1,10 @@
 <script lang="ts">
     import "dotenv/config";
-    import { requestUrl, Notice, App, TAbstractFile } from "obsidian";
+    import { requestUrl, Notice, TAbstractFile, parseFrontMatterEntry} from "obsidian";
 
     let promptInput = "";
     export let openAIKey: string = "";
-    export let personas: any[] = [];
-    export let plugin;
-    let selected;
+    export let app;
 
     import { ChatOpenAI } from "langchain/chat_models/openai";
     import {
@@ -24,17 +22,20 @@
     type ChatHistory = {
         content: string;
         file: TAbstractFile;
+        metaData: any;
     };
 
     let chatIndex: number = 0;
     let chatHistoryList: ChatHistory[] = [];
 
+    let personasIndex: number = 0;
+    let personasList: any[] = [];
+
     async function init() {
         chatHistoryList = await getFiles("./LLM History");
+        personasList = await getFiles("./LLM Personas");
         chatIndex = 0;
-        conversationMessages = await loadConversationMessages(
-            chatHistoryList[chatIndex].content
-        );
+        selectNewChat();
     }
 
     let conversationMessages: BaseChatMessage[] = [];
@@ -43,9 +44,9 @@
     let messagesContainer;
 
     async function createNewConversation() {
-        let index = findConversation("newChat.md");
+        let index = findFileNameInList(chatHistoryList, "newChat.md");
         if (index < 0) {
-            let newFile = await plugin.vault.create(
+            let newFile = await app.vault.create(
                 "LLM History/newChat.md",
                 ""
             );
@@ -59,11 +60,20 @@
         await selectNewChat();
     }
 
-    function findConversation(name: string) {
+    async function parseFrontMatter(f:string){
+        let file = app.vault.getAbstractFileByPath(f)
+        let metaData;
+        await app.fileManager.processFrontMatter(file, fm => metaData = fm);
+        // console.log(metadata);
+
+        return metaData;
+    }
+
+    function findFileNameInList(list, name){
         let index = -1;
-        for (let i = 0; i < chatHistoryList.length; i++) {
-            if (chatHistoryList[i].file.name == name) {
-                index = i;
+        for (let i = 0; i < list.length; i++) { 
+            if (list[i].file.name.toLowerCase() == name.toLowerCase()) {
+                index = i; 
                 break;
             }
         }
@@ -72,16 +82,17 @@
 
     async function getFile(
         f: string
-    ): Promise<{ content: string; file: TAbstractFile }> {
+    ): Promise<{ content: string; file: TAbstractFile; metaData }> {
         return {
-            file: await plugin.vault.getAbstractFileByPath(f),
-            content: await plugin.vault.adapter.read(f),
+            file: await app.vault.getAbstractFileByPath(f),
+            content: await app.vault.adapter.read(f),
+            metaData: await parseFrontMatter(f)
         };
     }
 
     //this is repeated from the starterIndex file and will need to be abstracted
     async function getFiles(path: string) {
-        const files = await plugin.vault.adapter.list(path); //"(./filepath)"
+        const files = await app.vault.adapter.list(path); //"(./filepath)"
         const filesContent = await Promise.all(
             files.files.map(async (f: string) => {
                 return getFile(f.substring(2));
@@ -97,6 +108,26 @@
         conversationMessages = await loadConversationMessages(
             chatHistoryList[chatIndex].content
         );
+        if(chatHistoryList[chatIndex].metaData?.system){
+            loadPersona(chatHistoryList[chatIndex].metaData?.system)
+        }
+        else {
+            selectPersona();
+        }
+    }
+
+    async function loadPersona(name){
+        personasIndex = findFileNameInList(personasList, name + ".md");
+    }
+
+    async function selectPersona(){
+        // let persona = personasList[personasIndex]; 
+        setMetadata(chatHistoryList[chatIndex].file, {system: personasList[personasIndex].file.basename})
+    }
+
+    async function setMetadata(file, data){
+
+        app.fileManager.processFrontMatter(file, fm => {for(let x in data){fm[x] = data[x]}});
     }
 
     function parseChatLog(chatLog) {
@@ -141,7 +172,7 @@
     }
 
     async function addMessageToHistory(message) {
-        plugin.vault.append(
+        app.vault.append(
             chatHistoryList[chatIndex].file,
             `\n${message.role}:\n${message.content}\n`
         );
@@ -151,9 +182,9 @@
         file: TAbstractFile,
         newFileName: string
     ) {
-        await plugin.vault.rename(file, "LLM History/" + newFileName);
+        await app.vault.rename(file, "LLM History/" + newFileName);
         await init();
-        chatIndex = findConversation(newFileName);
+        chatIndex = findFileNameInList(chatHistoryList, newFileName);
     }
 
     async function generateNewName(file) {
@@ -198,6 +229,7 @@
     }
 
     async function langChainPrompt(): Promise<void> {
+
         if (promptInput.trim() == "") {
             return;
         }
@@ -214,7 +246,7 @@
         });
 
         const response = await chat.call(
-            [...conversationMessages, new SystemChatMessage(selected.content)],
+            [...conversationMessages, new SystemChatMessage(personasList[personasIndex].content)],
             {
                 options: {
                     headers: {
@@ -250,18 +282,21 @@
     <h1>Basic Prompt</h1>
     <label for="system">System Instructions</label>
     <!-- <input name="system" type="text" bind:value={systemInput} /> -->
-    <select bind:value={selected}>
-        {#each personas as persona}
-            <option value={persona}>
-                {persona.title}
-            </option>
-        {/each}
+    <select bind:value={personasIndex} on:change={selectPersona}>
+        {#if personasList.length > 0}
+            {#each personasList as persona, i}
+                <option value={i}>
+                    {persona.file.basename}
+                </option>
+            {/each}
+        {/if}
     </select>
     <select bind:value={chatIndex} on:change={selectNewChat}>
-        {#if chatHistoryList.length > 0}
+        {#if chatHistoryList.length > 0} 
             {#each chatHistoryList as chatHistory, i}
                 <option value={i}>
-                    {chatHistory.file.name}
+                    
+                    {chatHistory.file.basename}
                 </option>
             {/each}
         {/if}

@@ -56,13 +56,10 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
 class BasicPromptView extends ItemView {
     view: BasicPrompt;
     openAIKey: string;
-    personas: any[];
 
-    constructor(leaf: WorkspaceLeaf, openAIKey: string, personas: any[]) {
+    constructor(leaf: WorkspaceLeaf, openAIKey: string) {
         super(leaf);
         this.openAIKey = openAIKey;
-        this.personas = personas;
-        
     }
 
 
@@ -81,7 +78,7 @@ class BasicPromptView extends ItemView {
 
     async onOpen(): Promise<void> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey, personas: this.personas, plugin: this.app } });
+        this.view = new BasicPrompt({ target: (this as any).contentEl, props: { openAIKey: this.openAIKey, app: this.app } });
     }
 }
 
@@ -93,23 +90,10 @@ export default class MyPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
         const openAIKey = this.settings.openAI_API_Key;
-        const personas = await getFiles(this);
-
-        async function getFiles(that) {
-            const files = that.app.vault.getMarkdownFiles();
-            const filteredFiles = files.filter(f => f.path.includes("LLM Personas"));
-            const result = await Promise.all(filteredFiles.map(async f => {
-                const content = await that.app.vault.read(f);
-                const title = f.name;
-                return { content, title }
-            }));
-            return result;
-        }
-
 
         this.registerView(
             VIEW_TYPE,
-            (leaf: WorkspaceLeaf) => (this.view = new BasicPromptView(leaf, openAIKey, personas))
+            (leaf: WorkspaceLeaf) => (this.view = new BasicPromptView(leaf, openAIKey))
         );
 
         // this.registerView(

@@ -1,6 +1,6 @@
 <script lang="ts">
     import "dotenv/config";
-    import { requestUrl, Notice, App } from "obsidian";
+    import { requestUrl, Notice, App, TAbstractFile } from "obsidian";
 
     let promptInput = "";
     export let openAIKey: string = "";
@@ -19,70 +19,63 @@
 
     onMount(async () => {
         init();
-        console.log(chatHistoryOptions);
     });
 
+    type ChatHistory = {
+        content: string;
+        file: TAbstractFile;
+    };
+
+    let chatIndex: number = 0;
+    let chatHistoryList: ChatHistory[] = [];
+
     async function init() {
-        chatHistoryOptions = await getFiles();
-        selectedHistory = chatHistoryOptions[0];
-        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
-            "LLM History/" + selectedHistory.title
+        chatHistoryList = await getFiles("./LLM History");
+        chatIndex = 0;
+        conversationMessages = await loadConversationMessages(
+            chatHistoryList[chatIndex].content
         );
-        conversationHistory = await loadChatHistory(selectedHistory.content);
-        console.log(chatHistoryFile);
     }
 
-    let conversationHistory: BaseChatMessage[] = [];
-    let recordConversation = true;
-    let chatHistoryFile;
-    let rawFiles = [];
-    let chatHistoryText;
-    let selectedHistory;
-    let chatHistoryOptions: any[] = [];
+    let conversationMessages: BaseChatMessage[] = [];
+    let recordConversation: boolean = true;
     let loading = false;
     let messagesContainer;
 
     async function createNewConversation() {
         let newFile = await plugin.vault.create("LLM History/newChat.md", "");
-        chatHistoryFile = newFile;
-        chatHistoryText = await getFile(newFile);
-
-        chatHistoryOptions = [...chatHistoryOptions, chatHistoryText];
-        await loadChatHistory(chatHistoryText.content);
-        selectedHistory = chatHistoryText;
-        console.log(newFile);
+        chatHistoryList = [...chatHistoryList, await getFile(newFile)];
+        await loadConversationMessages(chatHistoryList[chatIndex].content);
     }
 
-    async function getFile(f) {
-        const content = await plugin.vault.read(f);
-        const title = f.name;
-        return { content, title };
+    async function getFile(
+        f: string
+    ): Promise<{ content: string; file: TAbstractFile }> {
+        return {
+            file: await plugin.vault.getAbstractFileByPath(f),
+            content: await plugin.vault.adapter.read(f),
+        };
     }
 
     //this is repeated from the starterIndex file and will need to be abstracted
-    async function getFiles() {
-        const files = plugin.vault.getMarkdownFiles();
-        rawFiles = files;
-        const filteredFiles = files.filter((f) =>
-            f.path.includes("LLM History")
+    async function getFiles(path: string) {
+        const files = await plugin.vault.adapter.list(path); //"(./filepath)"
+        const filesContent = await Promise.all(
+            files.files.map(async (f: string) => {
+                return getFile(f.substring(2));
+            })
         );
-        const result = await Promise.all(
-            filteredFiles.map(async (f) => getFile(f))
-        );
-        return result;
+        return filesContent;
     }
 
     async function selectNewChat() {
-        chatHistoryFile = await plugin.vault.getAbstractFileByPath(
-            "LLM History/" + selectedHistory.title
+        chatHistoryList[chatIndex] = await getFile(chatHistoryList[chatIndex].file.path);
+        conversationMessages = await loadConversationMessages(
+            chatHistoryList[chatIndex].content
         );
-        let tempHistory = await getFile(chatHistoryFile);
-        // let metaData = await getFileCache(chatHistoryFile);
-        // console.log(metaData);
-        conversationHistory = await loadChatHistory(tempHistory.content);
     }
 
-    function parseChatLog(chatLog) { 
+    function parseChatLog(chatLog) {
         let messages: BaseChatMessage[] = [];
         if (chatLog.length == 0) {
             return messages;
@@ -110,9 +103,8 @@
         return messages;
     }
 
-    //Eventually will read from a Markdown(?) file
-    async function loadChatHistory(fileContent) {
-        conversationHistory = parseChatLog(fileContent);
+    async function loadConversationMessages(fileContent: string) {
+        let conversationHistory = parseChatLog(fileContent);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
         return conversationHistory;
     }
@@ -125,9 +117,8 @@
     }
 
     async function addMessageToHistory(message) {
-        console.log(chatHistoryFile);
         plugin.vault.append(
-            chatHistoryFile,
+            chatHistoryList[chatIndex].file,
             `\n${message.role}:\n${message.content}\n`
         );
     }
@@ -137,8 +128,8 @@
         let file = await plugin.vault.getAbstractFileByPath(
             "LLM History/" + fileName
         );
-        chatHistoryFile = file;
-        
+        chatHistoryList[chatIndex].file = file;
+
         await plugin.vault.rename(file, "LLM History/" + newFileName);
         init();
     }
@@ -147,10 +138,11 @@
         const newChat = new ChatOpenAI({
             openAIApiKey: openAIKey,
             temperature: 0.7,
-        }); 
-        console.log(conversationHistory);
+        });
+        console.log(conversationMessages);
         const res = await newChat.call(
-            [   ...conversationHistory,
+            [
+                ...conversationMessages,
                 new SystemChatMessage(
                     "Create a short but unique name for the following conversation."
                 ),
@@ -158,7 +150,6 @@
                     "your response should be no longer than 6 words"
                 ),
                 new SystemChatMessage(
-
                     "only include the exact name in your response and no other words"
                 ),
             ],
@@ -191,8 +182,10 @@
             return;
         }
         loading = true;
-        conversationHistory.push(new HumanChatMessage(promptInput));
-        conversationHistory = conversationHistory;
+        conversationMessages = [
+            ...conversationMessages,
+            new HumanChatMessage(promptInput),
+        ];
         addMessageToHistory({ role: "human", content: promptInput });
         promptInput = "";
         const chat = new ChatOpenAI({
@@ -201,7 +194,7 @@
         });
 
         const response = await chat.call(
-            [...conversationHistory, new SystemChatMessage(selected.content)],
+            [...conversationMessages, new SystemChatMessage(selected.content)],
             {
                 options: {
                     headers: {
@@ -211,13 +204,15 @@
                 },
             }
         );
-        conversationHistory.push(new AIChatMessage(response.text));
+        conversationMessages = [
+            ...conversationMessages,
+            new AIChatMessage(response.text),
+        ];
         addMessageToHistory({ role: "ai", content: response.text });
-        conversationHistory = conversationHistory;
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        if ((selectedHistory.title = "newChat")) {
-            generateNewName();
-        }
+        // if ((.title = "newChat")) {
+        //     generateNewName();
+        // }
         loading = false;
     }
 
@@ -243,33 +238,34 @@
             </option>
         {/each}
     </select>
-    <select bind:value={selectedHistory} on:change={selectNewChat}>
-        {#each chatHistoryOptions as file}
-            <option value={file}>
-                {file.title}
-            </option>
-        {/each}
+    <select bind:value={chatIndex} on:change={selectNewChat}>
+        {#if chatHistoryList.length > 0}
+            {#each chatHistoryList as chatHistory, i}
+                <option value={i}>
+                    {chatHistory.file.name}
+                </option>
+            {/each}
+        {/if}
     </select>
 
     <button
         on:click={createNewConversation}
-        class:disabled={!selectedHistory ||
-            selectedHistory.title == "newChat.md"}>New Chat</button
+        >New Chat</button
     >
     <button
         on:click={() => {
-            renameConversation(selectedHistory.title, "new Name.md");
+            renameConversation(chatHistoryList[chatIndex].file, "new Name.md");
         }}>Rename</button
     >
     <button
         on:click={() => {
-           init();
+            init();
         }}>Reset</button
     >
     <label for="record">Record Conversation</label>
     <input type="checkbox" name="record" bind:checked={recordConversation} />
     <div class="conversation-window" bind:this={messagesContainer}>
-        {#each conversationHistory as message (message.text)}
+        {#each conversationMessages as message (message.text)}
             {#if message._getType() != "system"}
                 <div
                     class="message"
@@ -280,7 +276,7 @@
                     <button
                         class="copy-button"
                         on:click={() => copyToClipboard(message.text)}
-                        >📋</button
+                        >Copy</button
                     >
                 </div>
             {/if}
@@ -340,11 +336,11 @@
     .copy-button {
         position: absolute;
         right: 0;
-        top: 50%;
-        transform: translateY(-50%);
+        top: 0;
+        /* transform: translateY(-50%); */
         visibility: hidden;
         cursor: pointer;
-        background: none;
+        background: black;
         border: none;
         font-size: 1.2em;
     }

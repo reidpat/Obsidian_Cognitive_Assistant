@@ -18,7 +18,7 @@
     import { onMount } from "svelte";
 
     onMount(async () => {
-        init();
+        await init();
     });
 
     type ChatHistory = {
@@ -43,9 +43,31 @@
     let messagesContainer;
 
     async function createNewConversation() {
-        let newFile = await plugin.vault.create("LLM History/newChat.md", "");
-        chatHistoryList = [...chatHistoryList, await getFile(newFile)];
-        await loadConversationMessages(chatHistoryList[chatIndex].content);
+        let index = findConversation("newChat.md");
+        if (index < 0) {
+            let newFile = await plugin.vault.create(
+                "LLM History/newChat.md",
+                ""
+            );
+            let loadedNewFile = await getFile(newFile.path);
+            chatHistoryList = [...chatHistoryList, loadedNewFile];
+            chatIndex = chatHistoryList.length - 1;
+        } else {
+            chatIndex = index;
+        }
+
+        await selectNewChat();
+    }
+
+    function findConversation(name: string) {
+        let index = -1;
+        for (let i = 0; i < chatHistoryList.length; i++) {
+            if (chatHistoryList[i].file.name == name) {
+                index = i;
+                break;
+            }
+        }
+        return index;
     }
 
     async function getFile(
@@ -69,7 +91,9 @@
     }
 
     async function selectNewChat() {
-        chatHistoryList[chatIndex] = await getFile(chatHistoryList[chatIndex].file.path);
+        chatHistoryList[chatIndex] = await getFile(
+            chatHistoryList[chatIndex].file.path
+        );
         conversationMessages = await loadConversationMessages(
             chatHistoryList[chatIndex].content
         );
@@ -123,23 +147,20 @@
         );
     }
 
-    async function renameConversation(fileName, newFileName) {
-        console.log(fileName, newFileName);
-        let file = await plugin.vault.getAbstractFileByPath(
-            "LLM History/" + fileName
-        );
-        chatHistoryList[chatIndex].file = file;
-
+    async function renameConversation(
+        file: TAbstractFile,
+        newFileName: string
+    ) {
         await plugin.vault.rename(file, "LLM History/" + newFileName);
-        init();
+        await init();
+        chatIndex = findConversation(newFileName);
     }
 
-    async function generateNewName() {
+    async function generateNewName(file) {
         const newChat = new ChatOpenAI({
             openAIApiKey: openAIKey,
             temperature: 0.7,
         });
-        console.log(conversationMessages);
         const res = await newChat.call(
             [
                 ...conversationMessages,
@@ -163,8 +184,7 @@
             }
         );
         let newName = filterInvalidChars(res.text);
-        console.log(newName);
-        renameConversation("newChat.md", newName + ".md");
+        renameConversation(file, newName + ".md");
     }
 
     function filterInvalidChars(fileName) {
@@ -210,16 +230,15 @@
         ];
         addMessageToHistory({ role: "ai", content: response.text });
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        // if ((.title = "newChat")) {
-        //     generateNewName();
-        // }
         loading = false;
+        if (chatHistoryList[chatIndex].file.name == "newChat.md") {
+            generateNewName(chatHistoryList[chatIndex].file);
+        }
     }
 
     async function copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
-            // console.("Text copied to clipboard");
             new Notice("Text Copied");
         } catch (err) {
             console.log("Error in copying text: ", err);
@@ -248,10 +267,7 @@
         {/if}
     </select>
 
-    <button
-        on:click={createNewConversation}
-        >New Chat</button
-    >
+    <button on:click={createNewConversation}>New Chat</button>
     <button
         on:click={() => {
             renameConversation(chatHistoryList[chatIndex].file, "new Name.md");
@@ -284,14 +300,14 @@
         {#if loading}
             <div class="message ai"><span>loading...</span></div>
         {/if}
-        <div class="input-area">
-            <textarea bind:value={promptInput} on:keydown={handleKeydown} />
-            <button
-                on:click={() => {
-                    langChainPrompt();
-                }}>Send</button
-            >
-        </div>
+    </div>
+    <div class="input-area">
+        <textarea bind:value={promptInput} on:keydown={handleKeydown} />
+        <button
+            on:click={() => {
+                langChainPrompt();
+            }}>Send</button
+        >
     </div>
 </div>
 
@@ -301,7 +317,7 @@
         flex-direction: column;
         width: 100%;
         max-width: 1200px;
-        max-height: 80vh;
+        max-height: 60vh;
         overflow-y: scroll;
         border: 1px solid grey;
         margin-top: 20px;

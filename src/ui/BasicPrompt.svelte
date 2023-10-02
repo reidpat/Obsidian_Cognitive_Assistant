@@ -182,6 +182,7 @@
         file: TAbstractFile,
         newFileName: string
     ) {
+        console.log(file);
         await app.vault.rename(file, "LLM History/" + newFileName);
         await init();
         chatIndex = findFileNameInList(chatHistoryList, newFileName);
@@ -305,13 +306,14 @@
     <button on:click={createNewConversation}>New Chat</button>
     <button
         on:click={() => {
+            console.log(chatHistoryList[chatIndex].file);
             renameConversation(chatHistoryList[chatIndex].file, "new Name.md");
         }}>Rename</button
     >
     <button
         on:click={() => {
             init();
-        }}>Reset</button
+        }}>Reload</button
     >
     <label for="record">Record Conversation</label>
     <input type="checkbox" name="record" bind:checked={recordConversation} />

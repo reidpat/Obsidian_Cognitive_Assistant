@@ -1,6 +1,12 @@
 <script lang="ts">
     import "dotenv/config";
-    import { requestUrl, Notice, TAbstractFile, parseFrontMatterEntry} from "obsidian";
+    import {
+        requestUrl,
+        Notice,
+        TAbstractFile,
+        parseFrontMatterEntry,
+    } from "obsidian";
+    import { getDailyNoteSettings, getAllDailyNotes, getDailyNote } from "obsidian-daily-notes-interface";
 
     let promptInput = "";
     export let openAIKey: string = "";
@@ -30,6 +36,7 @@
 
     let personasIndex: number = 0;
     let personasList: any[] = [];
+    let personaMetaData: any = {};
 
     async function init() {
         chatHistoryList = await getFiles("./LLM History");
@@ -46,10 +53,7 @@
     async function createNewConversation() {
         let index = findFileNameInList(chatHistoryList, "newChat.md");
         if (index < 0) {
-            let newFile = await app.vault.create(
-                "LLM History/newChat.md",
-                ""
-            );
+            let newFile = await app.vault.create("LLM History/newChat.md", "");
             let loadedNewFile = await getFile(newFile.path);
             chatHistoryList = [...chatHistoryList, loadedNewFile];
             chatIndex = chatHistoryList.length - 1;
@@ -60,20 +64,20 @@
         await selectNewChat();
     }
 
-    async function parseFrontMatter(f:string){
-        let file = app.vault.getAbstractFileByPath(f)
+    async function parseFrontMatter(f: string) {
+        let file = app.vault.getAbstractFileByPath(f);
         let metaData;
-        await app.fileManager.processFrontMatter(file, fm => metaData = fm);
+        await app.fileManager.processFrontMatter(file, (fm) => (metaData = fm));
         // console.log(metadata);
 
         return metaData;
     }
 
-    function findFileNameInList(list, name){
+    function findFileNameInList(list, name) {
         let index = -1;
-        for (let i = 0; i < list.length; i++) { 
+        for (let i = 0; i < list.length; i++) {
             if (list[i].file.name.toLowerCase() == name.toLowerCase()) {
-                index = i; 
+                index = i;
                 break;
             }
         }
@@ -86,7 +90,7 @@
         return {
             file: await app.vault.getAbstractFileByPath(f),
             content: await app.vault.adapter.read(f),
-            metaData: await parseFrontMatter(f)
+            metaData: await parseFrontMatter(f),
         };
     }
 
@@ -108,26 +112,32 @@
         conversationMessages = await loadConversationMessages(
             chatHistoryList[chatIndex].content
         );
-        if(chatHistoryList[chatIndex].metaData?.system){
-            loadPersona(chatHistoryList[chatIndex].metaData?.system)
-        }
-        else {
+        if (chatHistoryList[chatIndex].metaData?.system) {
+            loadPersona(chatHistoryList[chatIndex].metaData?.system);
+        } else {
             selectPersona();
         }
     }
 
-    async function loadPersona(name){
+    async function loadPersona(name) {
         personasIndex = findFileNameInList(personasList, name + ".md");
+        personaMetaData = personasList[personasIndex].metaData;
+        console.log(personaMetaData);
     }
 
-    async function selectPersona(){
-        // let persona = personasList[personasIndex]; 
-        setMetadata(chatHistoryList[chatIndex].file, {system: personasList[personasIndex].file.basename})
+    async function selectPersona() {
+        // let persona = personasList[personasIndex];
+        setMetadata(chatHistoryList[chatIndex].file, {
+            system: personasList[personasIndex].file.basename,
+        });
     }
 
-    async function setMetadata(file, data){
-
-        app.fileManager.processFrontMatter(file, fm => {for(let x in data){fm[x] = data[x]}});
+    async function setMetadata(file, data) {
+        app.fileManager.processFrontMatter(file, (fm) => {
+            for (let x in data) {
+                fm[x] = data[x];
+            }
+        });
     }
 
     function parseChatLog(chatLog) {
@@ -141,17 +151,20 @@
         );
 
         // Create an array of message objects
+        if (rawMessages) {
+            for (let rawMessage of rawMessages) {
+                const prefix = rawMessage
+                    .slice(0, rawMessage.indexOf(":"))
+                    .trim();
+                const message = rawMessage
+                    .slice(rawMessage.indexOf(":") + 1)
+                    .trim();
 
-        for (let rawMessage of rawMessages) {
-            const prefix = rawMessage.slice(0, rawMessage.indexOf(":")).trim();
-            const message = rawMessage
-                .slice(rawMessage.indexOf(":") + 1)
-                .trim();
-
-            if (prefix === "human") {
-                messages.push(new HumanChatMessage(message));
-            } else if (prefix === "ai") {
-                messages.push(new AIChatMessage(message));
+                if (prefix === "human") {
+                    messages.push(new HumanChatMessage(message));
+                } else if (prefix === "ai") {
+                    messages.push(new AIChatMessage(message));
+                }
             }
         }
 
@@ -183,9 +196,29 @@
         newFileName: string
     ) {
         console.log(file);
+        if (personaMetaData.isoPrefix) {
+            newFileName = getCurrentDateISO() + " " + newFileName;
+        }
+        if(personaMetaData.attachToDaily){
+            attachNoteToDaily(newFileName);
+        }
         await app.vault.rename(file, "LLM History/" + newFileName);
         await init();
         chatIndex = findFileNameInList(chatHistoryList, newFileName);
+    }
+
+    async function attachNoteToDaily(fileName){
+        let dailySettings = getDailyNoteSettings();
+        let dailyNote = await getFile(dailySettings.folder + "/" + getCurrentDateISO() + ".md");
+        app.vault.append(
+            dailyNote.file,
+            `![[${fileName}]]`
+        );
+    }
+
+    function getCurrentDateISO() {
+        const date = new Date();
+        return date.toISOString().slice(0, 10);
     }
 
     async function generateNewName(file) {
@@ -230,7 +263,6 @@
     }
 
     async function langChainPrompt(): Promise<void> {
-
         if (promptInput.trim() == "") {
             return;
         }
@@ -247,7 +279,10 @@
         });
 
         const response = await chat.call(
-            [...conversationMessages, new SystemChatMessage(personasList[personasIndex].content)],
+            [
+                ...conversationMessages,
+                new SystemChatMessage(personasList[personasIndex].content),
+            ],
             {
                 options: {
                     headers: {
@@ -293,10 +328,9 @@
         {/if}
     </select>
     <select bind:value={chatIndex} on:change={selectNewChat}>
-        {#if chatHistoryList.length > 0} 
+        {#if chatHistoryList.length > 0}
             {#each chatHistoryList as chatHistory, i}
                 <option value={i}>
-                    
                     {chatHistory.file.basename}
                 </option>
             {/each}
@@ -315,7 +349,7 @@
             init();
         }}>Reload</button
     >
-    <label for="record">Record Conversation</label>
+    <!-- <label for="record">Record Conversation</label> -->
     <input type="checkbox" name="record" bind:checked={recordConversation} />
     <div class="conversation-window" bind:this={messagesContainer}>
         {#each conversationMessages as message (message.text)}

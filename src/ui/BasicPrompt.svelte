@@ -6,11 +6,17 @@
         TAbstractFile,
         parseFrontMatterEntry,
     } from "obsidian";
-    import { getDailyNoteSettings, getAllDailyNotes, getDailyNote } from "obsidian-daily-notes-interface";
+    import {
+        getDailyNoteSettings,
+        getAllDailyNotes,
+        getDailyNote,
+    } from "obsidian-daily-notes-interface";
 
     let promptInput = "";
     export let openAIKey: string = "";
     export let app;
+
+    import { marked } from 'marked';
 
     import { ChatOpenAI } from "langchain/chat_models/openai";
     import {
@@ -85,7 +91,7 @@
     }
 
     async function getFile(
-        f: string
+        f: string,
     ): Promise<{ content: string; file: TAbstractFile; metaData }> {
         return {
             file: await app.vault.getAbstractFileByPath(f),
@@ -100,17 +106,17 @@
         const filesContent = await Promise.all(
             files.files.map(async (f: string) => {
                 return getFile(f.substring(2));
-            })
+            }),
         );
         return filesContent;
     }
 
     async function selectNewChat() {
         chatHistoryList[chatIndex] = await getFile(
-            chatHistoryList[chatIndex].file.path
+            chatHistoryList[chatIndex].file.path,
         );
         conversationMessages = await loadConversationMessages(
-            chatHistoryList[chatIndex].content
+            chatHistoryList[chatIndex].content,
         );
         if (chatHistoryList[chatIndex].metaData?.system) {
             loadPersona(chatHistoryList[chatIndex].metaData?.system);
@@ -147,7 +153,7 @@
         }
         // Use a regular expression to split the text into message prefixes and contents
         const rawMessages = chatLog.match(
-            /(human|ai):[\s\S]*?(?=(human|ai):|$)/g
+            /(human|ai):[\s\S]*?(?=(human|ai):|$)/g,
         );
 
         // Create an array of message objects
@@ -187,19 +193,23 @@
     async function addMessageToHistory(message) {
         app.vault.append(
             chatHistoryList[chatIndex].file,
-            `\n${message.role}:\n${message.content}\n`
+            `\n${message.role}:\n${message.content}\n`,
         );
     }
 
     async function renameConversation(
         file: TAbstractFile,
-        newFileName: string
+        newFileName: string,
     ) {
         console.log(file);
         if (personaMetaData.isoPrefix) {
-            newFileName = getCurrentDateISO() + " " + newFileName;
+            if (personaMetaData.attachToDaily) {
+                newFileName = getCurrentDateISO() + " " + "Daily Chat";
+            } else {
+                newFileName = getCurrentDateISO() + " " + newFileName;
+            }
         }
-        if(personaMetaData.attachToDaily){
+        if (personaMetaData.attachToDaily) {
             attachNoteToDaily(newFileName);
         }
         await app.vault.rename(file, "LLM History/" + newFileName);
@@ -207,13 +217,12 @@
         chatIndex = findFileNameInList(chatHistoryList, newFileName);
     }
 
-    async function attachNoteToDaily(fileName){
+    async function attachNoteToDaily(fileName) {
         let dailySettings = getDailyNoteSettings();
-        let dailyNote = await getFile(dailySettings.folder + "/" + getCurrentDateISO() + ".md");
-        app.vault.append(
-            dailyNote.file,
-            `![[${fileName}]]`
+        let dailyNote = await getFile(
+            dailySettings.folder + "/" + getCurrentDateISO() + ".md",
         );
+        app.vault.append(dailyNote.file, `![[${fileName}]]`);
     }
 
     function getCurrentDateISO() {
@@ -226,17 +235,18 @@
             openAIApiKey: openAIKey,
             temperature: 0.7,
         });
+
         const res = await newChat.call(
             [
                 ...conversationMessages,
                 new SystemChatMessage(
-                    "Create a short but unique name for the following conversation."
+                    "Create a short but unique name for the following conversation.",
                 ),
                 new SystemChatMessage(
-                    "your response should be no longer than 6 words"
+                    "your response should be no longer than 6 words",
                 ),
                 new SystemChatMessage(
-                    "only include the exact name in your response and no other words"
+                    "only include the exact name in your response and no other words",
                 ),
             ],
             {
@@ -246,7 +256,7 @@
                         "Access-Control-Allow-Origin": "*",
                     },
                 },
-            }
+            },
         );
         let newName = filterInvalidChars(res.text);
         renameConversation(file, newName + ".md");
@@ -262,6 +272,8 @@
         return validFileName;
     }
 
+    let streamedResponse = "";
+
     async function langChainPrompt(): Promise<void> {
         if (promptInput.trim() == "") {
             return;
@@ -274,6 +286,15 @@
         addMessageToHistory({ role: "human", content: promptInput });
         promptInput = "";
         const chat = new ChatOpenAI({
+            streaming: true,
+            modelName: "gpt-4-1106-preview",
+            callbacks: [
+                {
+                    handleLLMNewToken(token) {
+                        streamedResponse += token;
+                    },
+                },
+            ],
             openAIApiKey: openAIKey,
             temperature: 0.3,
         });
@@ -290,7 +311,7 @@
                         "Access-Control-Allow-Origin": "*",
                     },
                 },
-            }
+            },
         );
         conversationMessages = [
             ...conversationMessages,
@@ -299,6 +320,7 @@
         addMessageToHistory({ role: "ai", content: response.text });
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
         loading = false;
+        streamedResponse = "";
         if (chatHistoryList[chatIndex].file.name == "newChat.md") {
             generateNewName(chatHistoryList[chatIndex].file);
         }
@@ -331,7 +353,7 @@
         {#if chatHistoryList.length > 0}
             {#each chatHistoryList as chatHistory, i}
                 <option value={i}>
-                    {chatHistory.file.basename}
+                    {chatHistory.file.name}
                 </option>
             {/each}
         {/if}
@@ -349,7 +371,7 @@
             init();
         }}>Reload</button
     >
-    <!-- <label for="record">Record Conversation</label> -->
+    <label for="record">Record Conversation</label>
     <input type="checkbox" name="record" bind:checked={recordConversation} />
     <div class="conversation-window" bind:this={messagesContainer}>
         {#each conversationMessages as message (message.text)}
@@ -359,7 +381,8 @@
                     class:human={message._getType() === "human"}
                     class:ai={message._getType() === "ai"}
                 >
-                    <span>{message.text}</span>
+                <span>{@html marked(message.text)}</span>
+                    <!-- <p>{message.text}</p> -->
                     <button
                         class="copy-button"
                         on:click={() => copyToClipboard(message.text)}
@@ -369,7 +392,7 @@
             {/if}
         {/each}
         {#if loading}
-            <div class="message ai"><span>loading...</span></div>
+            <div class="message ai"><p>{streamedResponse}</p></div>
         {/if}
     </div>
     <div class="input-area">
@@ -403,6 +426,10 @@
     }
     .human {
         align-self: flex-end;
+    }
+    p {
+        display: inline-block;
+        white-space: pre-line;  
     }
     .input-area {
         display: flex;
